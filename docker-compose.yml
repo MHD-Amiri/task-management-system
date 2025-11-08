@@ -1,0 +1,110 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    # container_name: task-postgres            # avoid container_name in production (keeps compose portable)
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-taskdb}
+      # Set PGDATA so Postgres stores its files in a subfolder (safer for volume mounting)
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-taskdb} -h localhost || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - task-network
+
+  redis:
+    image: redis:7-alpine
+    # container_name: task-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - task-network
+
+  task-service:
+    build:
+      context: .
+      dockerfile: task-service/Dockerfile
+    # container_name: task-service
+    ports:
+      - "${TASK_SERVICE_PORT:-3001}:3001"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3001
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-taskdb}"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SCHEDULER_SERVICE_URL: http://scheduler-service:3002
+      COMMUNICATION_MODE: ${COMMUNICATION_MODE:-http}
+      API_VERSIONING_STRATEGY: ${API_VERSIONING_STRATEGY:-url}
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key}
+    volumes:
+      - ./task-service/uploads:/app/uploads
+    depends_on:
+      - postgres
+      - redis
+    # simple start command that waits for DB + Redis readiness before launching Node
+    command: >
+      sh -c "
+        echo 'waiting for postgres...';
+        until pg_isready -h postgres -p 5432 -U ${POSTGRES_USER:-postgres}; do sleep 1; done;
+        echo 'waiting for redis...';
+        until redis-cli -h redis ping | grep -q PONG; do sleep 1; done;
+        echo 'starting task-service';
+        node dist/main.js
+      "
+    restart: on-failure
+    networks:
+      - task-network
+
+  scheduler-service:
+    build:
+      context: .
+      dockerfile: scheduler-service/Dockerfile
+    # container_name: scheduler-service
+    ports:
+      - "${SCHEDULER_SERVICE_PORT:-3002}:3002"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3002
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-taskdb}"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      COMMUNICATION_MODE: ${COMMUNICATION_MODE:-http}
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key}
+    depends_on:
+      - postgres
+      - redis
+    command: >
+      sh -c "
+        echo 'waiting for postgres...';
+        until pg_isready -h postgres -p 5432 -U ${POSTGRES_USER:-postgres}; do sleep 1; done;
+        echo 'waiting for redis...';
+        until redis-cli -h redis ping | grep -q PONG; do sleep 1; done;
+        echo 'starting scheduler-service';
+        node dist/main.js
+      "
+    restart: on-failure
+    networks:
+      - task-network
+
+volumes:
+  postgres_data:
+
+networks:
+  task-network:
+    driver: bridge

@@ -1,0 +1,26 @@
+{
+  "name": "@task-management/socket-io",
+  "version": "1.0.0",
+  "description": "Shared Socket.IO library for Task Management System",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/websockets": "^10.0.0",
+    "@nestjs/platform-socket.io": "^10.0.0",
+    "socket.io": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/core": "^10.0.0"
+  }
+}
+
